@@ -1,0 +1,6 @@
+{
+  "name": "Recallio",
+  "description": "Your voice. Your notes. Your revision. An offline-first personal voice revision application for recording, organizing, and reviewing academic concepts.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
