@@ -93,7 +93,6 @@ export const AudioPlayerProvider: React.FC<{
   const shuffleRef = useRef(shuffleQueue);
   const activeRevQueueRef = useRef(activeRevisionQueueId);
   const listenedAccumulatorRef = useRef(0);
-  const lastTimeTickRef = useRef(0);
 
   currentRecRef.current = currentRecording;
   abRepeatRef.current = abRepeat;
@@ -104,6 +103,8 @@ export const AudioPlayerProvider: React.FC<{
   shuffleRef.current = shuffleQueue;
   activeRevQueueRef.current = activeRevisionQueueId;
 
+  const playStartedPerfRef = useRef<number | null>(null);
+
   const revokeCurrentUrl = useCallback(() => {
     if (objectUrlRef.current) {
       URL.revokeObjectURL(objectUrlRef.current);
@@ -111,20 +112,36 @@ export const AudioPlayerProvider: React.FC<{
     }
   }, []);
 
-  const persistProgress = useCallback(async (pos?: number) => {
-    const rec = currentRecRef.current;
+  const flushListeningTime = useCallback(async () => {
     const audio = audioRef.current;
-    if (!rec || !audio || !settingsRef.current.autoSaveProgress) return;
-    const position = typeof pos === 'number' ? pos : audio.currentTime;
-    if (Number.isFinite(position)) {
-      await updateRecording(rec.id, { lastPosition: position }).catch(() => {});
+    if (playStartedPerfRef.current !== null && audio && !audio.paused) {
+      const nowPerf = performance.now();
+      const deltaSec = (nowPerf - playStartedPerfRef.current) / 1000;
+      playStartedPerfRef.current = nowPerf;
+      if (deltaSec > 0 && deltaSec < 30) {
+        listenedAccumulatorRef.current += deltaSec;
+      }
     }
-    if (listenedAccumulatorRef.current >= 2) {
-      const secs = listenedAccumulatorRef.current;
-      listenedAccumulatorRef.current = 0;
-      await recordListeningSeconds(secs).catch(() => {});
+    const wholeSecs = Math.floor(listenedAccumulatorRef.current);
+    if (wholeSecs >= 1) {
+      listenedAccumulatorRef.current -= wholeSecs;
+      await recordListeningSeconds(wholeSecs).catch(() => {});
     }
   }, []);
+
+  const persistProgress = useCallback(
+    async (pos?: number) => {
+      await flushListeningTime();
+      const rec = currentRecRef.current;
+      const audio = audioRef.current;
+      if (!rec || !audio || !settingsRef.current.autoSaveProgress) return;
+      const position = typeof pos === 'number' ? pos : audio.currentTime;
+      if (Number.isFinite(position)) {
+        await updateRecording(rec.id, { lastPosition: position }).catch(() => {});
+      }
+    },
+    [flushListeningTime],
+  );
 
   // Initialize single persistent HTMLAudioElement
   useEffect(() => {
@@ -136,20 +153,10 @@ export const AudioPlayerProvider: React.FC<{
       const t = audio.currentTime;
       setCurrentTime(t);
 
-      // Accumulate real listened time
-      if (!audio.paused) {
-        const delta = t - lastTimeTickRef.current;
-        if (delta > 0 && delta < 2) {
-          listenedAccumulatorRef.current += delta;
-        }
-        lastTimeTickRef.current = t;
-      }
-
       // Enforce A-B Repeat
       const ab = abRepeatRef.current;
       if (ab.enabled && ab.pointA !== null && ab.pointB !== null && t >= ab.pointB) {
         audio.currentTime = ab.pointA;
-        lastTimeTickRef.current = ab.pointA;
       }
     };
 
@@ -161,15 +168,23 @@ export const AudioPlayerProvider: React.FC<{
 
     const handlePlay = () => {
       setIsPlaying(true);
-      lastTimeTickRef.current = audio.currentTime;
+      playStartedPerfRef.current = performance.now();
     };
 
     const handlePause = () => {
+      if (playStartedPerfRef.current !== null) {
+        const deltaSec = (performance.now() - playStartedPerfRef.current) / 1000;
+        playStartedPerfRef.current = null;
+        if (deltaSec > 0 && deltaSec < 30) {
+          listenedAccumulatorRef.current += deltaSec;
+        }
+      }
       setIsPlaying(false);
       persistProgress();
     };
 
     const handleError = () => {
+      playStartedPerfRef.current = null;
       setIsPlaying(false);
       setIsLoading(false);
       setError('Unable to play this audio file. The recording may be corrupted or unsupported.');
@@ -185,7 +200,7 @@ export const AudioPlayerProvider: React.FC<{
       if (!audio.paused) {
         persistProgress();
       }
-    }, 3000);
+    }, 2000);
 
     const handlePageHide = () => {
       persistProgress();
@@ -302,6 +317,7 @@ export const AudioPlayerProvider: React.FC<{
     if (!audio) return;
 
     const handleEnded = async () => {
+      await flushListeningTime();
       const rec = currentRecRef.current;
       if (rec) {
         await updateRecording(rec.id, { lastPosition: 0 }).catch(() => {});
@@ -339,7 +355,7 @@ export const AudioPlayerProvider: React.FC<{
     return () => {
       audio.removeEventListener('ended', handleEnded);
     };
-  }, [loadAndPlay, onQueueTrackCompleted]);
+  }, [flushListeningTime, loadAndPlay, onQueueTrackCompleted]);
 
   const togglePlayPause = useCallback(async () => {
     const audio = audioRef.current;
@@ -366,7 +382,6 @@ export const AudioPlayerProvider: React.FC<{
       const maxDur = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : duration;
       const clamped = Math.max(0, Math.min(maxDur || 0, seconds));
       audio.currentTime = clamped;
-      lastTimeTickRef.current = clamped;
       setCurrentTime(clamped);
       persistProgress(clamped);
     },

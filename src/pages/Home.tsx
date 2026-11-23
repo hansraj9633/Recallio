@@ -88,26 +88,40 @@ export const Home: React.FC<HomeProps> = ({
     [activeRecordings],
   );
 
-  // 7-day weekly revision activity
+  const [selectedDayKey, setSelectedDayKey] = React.useState<string | null>(null);
+
+  // 7-day weekly revision activity (real recorded + listened seconds)
   const weeklyDays = useMemo(() => {
     const map = new Map(activity.map((a) => [a.date, a]));
-    const days: { dateKey: string; label: string; minutes: number }[] = [];
+    const days: {
+      dateKey: string;
+      label: string;
+      fullDate: string;
+      recordedSeconds: number;
+      listenedSeconds: number;
+      totalSeconds: number;
+    }[] = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date(Date.now() - i * 86400000);
       const key = toDateKey(d);
       const entry = map.get(key);
-      const totalSeconds = (entry?.recordedSeconds ?? 0) + (entry?.listenedSeconds ?? 0);
+      const recSec = entry?.recordedSeconds ?? 0;
+      const lisSec = entry?.listenedSeconds ?? 0;
       days.push({
         dateKey: key,
         label: d.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 2),
-        minutes: Math.round(totalSeconds / 60),
+        fullDate: d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }),
+        recordedSeconds: recSec,
+        listenedSeconds: lisSec,
+        totalSeconds: recSec + lisSec,
       });
     }
     return days;
   }, [activity]);
 
-  const maxWeeklyMinutes = Math.max(10, ...weeklyDays.map((d) => d.minutes));
-  const totalWeeklyMinutes = weeklyDays.reduce((s, d) => s + d.minutes, 0);
+  const maxWeeklySeconds = Math.max(60, ...weeklyDays.map((d) => d.totalSeconds));
+  const totalWeeklySeconds = weeklyDays.reduce((s, d) => s + d.totalSeconds, 0);
+  const selectedDay = weeklyDays.find((d) => d.dateKey === selectedDayKey) ?? null;
 
   const handleToggleFavourite = async (rec: Recording) => {
     await updateRecording(rec.id, { isFavourite: !rec.isFavourite });
@@ -267,41 +281,106 @@ export const Home: React.FC<HomeProps> = ({
 
         {/* Weekly Revision Activity */}
         <div className="lg:col-span-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] p-5 sm:p-6 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              Weekly Activity
-            </h2>
-            <span className="text-xs font-mono tabular-nums text-slate-500 dark:text-slate-400">
-              {totalWeeklyMinutes}m this week
-            </span>
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                Weekly Activity
+              </h2>
+              <span className="text-xs font-mono tabular-nums text-slate-500 dark:text-slate-400">
+                {formatHumanDuration(totalWeeklySeconds)} this week
+              </span>
+            </div>
+
+            <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+              <div className="flex items-center gap-3">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-sm bg-indigo-600 dark:bg-indigo-400" />
+                  Recorded
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-sm bg-teal-500 dark:bg-teal-400" />
+                  Listened
+                </span>
+              </div>
+              {selectedDay && (
+                <span className="font-mono tabular-nums text-slate-700 dark:text-slate-300 truncate">
+                  {selectedDay.fullDate}: {formatHumanDuration(selectedDay.recordedSeconds)} rec ·{' '}
+                  {formatHumanDuration(selectedDay.listenedSeconds)} play
+                </span>
+              )}
+            </div>
           </div>
 
-          <div className="mt-6 flex items-end justify-between gap-2 h-32 pt-4">
+          <div className="mt-4 flex items-end justify-between gap-2 h-32 pt-4">
             {weeklyDays.map((day) => {
-              const heightPct = day.minutes > 0 ? Math.max(12, Math.round((day.minutes / maxWeeklyMinutes) * 100)) : 6;
+              const totalPct =
+                day.totalSeconds > 0
+                  ? Math.max(12, Math.round((day.totalSeconds / maxWeeklySeconds) * 100))
+                  : 5;
+              const recShare =
+                day.totalSeconds > 0 ? Math.round((day.recordedSeconds / day.totalSeconds) * 100) : 0;
+              const isSelected = selectedDayKey === day.dateKey;
               return (
-                <div key={day.dateKey} className="flex-1 flex flex-col items-center gap-2 h-full justify-end">
-                  <span className="text-[10px] font-mono tabular-nums text-slate-400 dark:text-slate-500">
-                    {day.minutes > 0 ? `${day.minutes}m` : ''}
+                <button
+                  key={day.dateKey}
+                  type="button"
+                  onClick={() =>
+                    setSelectedDayKey((prev) => (prev === day.dateKey ? null : day.dateKey))
+                  }
+                  className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end group focus:outline-none"
+                  title={`${day.fullDate} — Recorded: ${formatHumanDuration(day.recordedSeconds)}, Listened: ${formatHumanDuration(day.listenedSeconds)}`}
+                >
+                  <span className="text-[10px] font-mono tabular-nums text-slate-400 dark:text-slate-500 leading-none">
+                    {day.totalSeconds > 0 ? formatHumanDuration(day.totalSeconds) : ''}
                   </span>
                   <div className="w-full max-w-[28px] flex-1 flex items-end">
                     <div
-                      className={`w-full rounded-t-md transition-all ${
-                        day.minutes > 0
-                          ? 'bg-indigo-600 dark:bg-indigo-400'
+                      className={`w-full rounded-t-md overflow-hidden flex flex-col justify-end transition-all ${
+                        day.totalSeconds > 0
+                          ? isSelected
+                            ? 'ring-2 ring-indigo-500/60'
+                            : 'group-hover:opacity-90'
                           : 'bg-slate-200 dark:bg-slate-800'
                       }`}
-                      style={{ height: `${heightPct}%` }}
-                      title={`${day.dateKey}: ${day.minutes} min`}
-                    />
+                      style={{ height: `${totalPct}%` }}
+                    >
+                      {day.totalSeconds > 0 && (
+                        <>
+                          {day.listenedSeconds > 0 && (
+                            <div
+                              className="w-full bg-teal-500 dark:bg-teal-400"
+                              style={{ height: `${100 - recShare}%` }}
+                            />
+                          )}
+                          {day.recordedSeconds > 0 && (
+                            <div
+                              className="w-full bg-indigo-600 dark:bg-indigo-400"
+                              style={{ height: `${recShare}%` }}
+                            />
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                  <span
+                    className={`text-[11px] font-medium ${
+                      isSelected
+                        ? 'text-indigo-600 dark:text-indigo-400'
+                        : 'text-slate-500 dark:text-slate-400'
+                    }`}
+                  >
                     {day.label}
                   </span>
-                </div>
+                </button>
               );
             })}
           </div>
+
+          {totalWeeklySeconds === 0 && (
+            <p className="mt-2 text-center text-[11px] text-slate-400 dark:text-slate-500">
+              Record or play a voice note to track your real revision time here.
+            </p>
+          )}
         </div>
       </div>
 

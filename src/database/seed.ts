@@ -1,11 +1,10 @@
 import { db } from './db';
 import { createSampleWavBlob } from '../utils/audio';
-import { toDateKey } from '../utils/formatTime';
 import { DEFAULT_USER_SETTINGS } from '../types/settings';
 import type { Subject } from '../types/subject';
 import type { Topic } from '../types/topic';
 import type { AudioBlobRecord, Bookmark, Recording } from '../types/recording';
-import type { RevisionActivity, RevisionQueue } from '../types/revision';
+import type { RevisionQueue } from '../types/revision';
 
 let initPromise: Promise<void> | null = null;
 
@@ -247,22 +246,9 @@ export async function seedInitialSampleData(): Promise<void> {
     },
   ];
 
-  const activityEntries: RevisionActivity[] = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(now - i * day);
-    const key = toDateKey(d);
-    const sampleMins = [12, 0, 18, 8, 24, 15, 6][6 - i] ?? 0;
-    activityEntries.push({
-      date: key,
-      recordedSeconds: Math.round(sampleMins * 0.4 * 60),
-      listenedSeconds: Math.round(sampleMins * 0.6 * 60),
-      sessionsCount: sampleMins > 0 ? 1 : 0,
-    });
-  }
-
   await db.transaction(
     'rw',
-    [db.subjects, db.topics, db.recordings, db.audioBlobs, db.bookmarks, db.revisionQueues, db.revisionActivity],
+    [db.subjects, db.topics, db.recordings, db.audioBlobs, db.bookmarks, db.revisionQueues],
     async () => {
       await db.subjects.bulkPut(subjects);
       await db.topics.bulkPut(topics);
@@ -270,7 +256,6 @@ export async function seedInitialSampleData(): Promise<void> {
       await db.audioBlobs.bulkPut(audioBlobs);
       await db.bookmarks.bulkPut(bookmarks);
       await db.revisionQueues.bulkPut(revisionQueues);
-      await db.revisionActivity.bulkPut(activityEntries);
     },
   );
 }
